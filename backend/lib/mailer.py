@@ -14,7 +14,7 @@ async def send_email(to: str, subject: str, html: str, text: str) -> bool:
     key = (os.environ.get("RESEND_API_KEY") or "").strip()
     sender = os.environ.get("EMAIL_FROM") or "CyberHire <onboarding@resend.dev>"
     if not key:
-        logger.warning("RESEND_API_KEY not set; email to %s not sent (subject: %s)", to, subject)
+        logger.warning("RESEND_API_KEY not set; email to %s not sent (subject: %s). Message:\n%s", to, subject, text)
         return False
     try:
         async with httpx.AsyncClient(timeout=15) as c:

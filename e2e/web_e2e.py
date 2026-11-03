@@ -9,6 +9,7 @@ import json
 import os
 import sys
 import time
+import traceback
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -35,87 +36,106 @@ def webhook(user_id: str, status="trialing", days=3):
     assert r.status_code == 200, r.text
 
 
-def step(name):
-    print(f"--- {name}", flush=True)
+def watch(pg, label):
+    pg.on("pageerror", lambda e: errors.append(f"[{label}] pageerror: {e}"))
+    pg.on("console", lambda m: m.type == "error" and "Failed to load resource" not in m.text and errors.append(f"[{label}] console: {m.text}"))
+
+
+def main(b):
+    state = {"step": "", "page": None}
+
+    def step(name, pg):
+        state["step"], state["page"] = name, pg
+        print(f"--- {name}", flush=True)
+
+    try:
+        for label, vp in (("desktop", {"width": 1366, "height": 860}), ("phone", {"width": 390, "height": 844})):
+            ctx = b.new_context(viewport=vp)
+            pg = ctx.new_page()
+            watch(pg, label)
+            step(f"landing ({label})", pg)
+            pg.goto(BASE + "/")
+            expect(pg.get_by_test_id("landing-title")).to_be_visible(timeout=15000)
+            pg.screenshot(path=str(OUT / f"01-landing-{label}.png"), full_page=True)
+            if pg.evaluate("document.documentElement.scrollWidth > window.innerWidth + 1"):
+                errors.append(f"horizontal overflow on landing ({label})")
+            ctx.close()
+
+        ctx = b.new_context(viewport={"width": 1366, "height": 860})
+        pg = ctx.new_page()
+        watch(pg, "flow")
+        pg.route("https://checkout.stripe.com/**", lambda r: r.fulfill(body="<h1>Stripe Checkout (test stand-in)</h1>", content_type="text/html"))
+
+        step("legal pages", pg)
+        for path in ("/terms", "/privacy", "/refund-policy", "/delete-account"):
+            pg.goto(BASE + path)
+            expect(pg.get_by_test_id("legal-page")).to_be_visible()
+        pg.screenshot(path=str(OUT / "02-privacy.png"))
+
+        step("sign up", pg)
+        email = f"e2e{uuid.uuid4().hex[:6]}@example.com"
+        pg.goto(BASE + "/register")
+        pg.get_by_test_id("register-name-input").fill("E2E Tester")
+        pg.get_by_test_id("register-email-input").fill(email)
+        pg.get_by_test_id("register-password-input").fill("e2e-password-1")
+        pg.get_by_test_id("register-submit-button").click()
+        pg.wait_for_url("**/pricing?welcome=1", timeout=15000)
+        expect(pg.get_by_test_id("plan-month")).to_be_visible()
+        expect(pg.get_by_text("First 3 days free").first).to_be_visible()
+        pg.screenshot(path=str(OUT / "03-pricing-after-signup.png"), full_page=True)
+
+        step("paywall", pg)
+        pg.goto(BASE + "/interview/new")
+        pg.wait_for_url("**/pricing", timeout=10000)
+
+        step("checkout", pg)
+        pg.get_by_test_id("checkout-stripe-month-button").click()
+        pg.wait_for_url("https://checkout.stripe.com/**", timeout=15000)
+
+        step("trial activated by webhook", pg)
+        pg.goto(BASE + "/pricing")
+        uid = pg.evaluate("fetch('/api/auth/me').then(r => r.json()).then(u => u.id)")
+        webhook(uid)
+        pg.goto(BASE + "/")
+        expect(pg.get_by_test_id("nav-trial-badge")).to_be_visible(timeout=15000)
+        pg.screenshot(path=str(OUT / "04-dashboard-trial.png"))
+        pg.goto(BASE + "/interview/new")
+        expect(pg.get_by_test_id("page-title")).to_be_visible()
+        if "/pricing" in pg.url:
+            errors.append("interview setup still paywalled after trial started")
+
+        step("profile", pg)
+        pg.goto(BASE + "/profile")
+        expect(pg.get_by_test_id("subscription-panel")).to_be_visible()
+        expect(pg.get_by_test_id("manage-billing-button")).to_be_visible()
+        expect(pg.get_by_test_id("delete-account-panel")).to_be_visible()
+        pg.screenshot(path=str(OUT / "05-profile.png"), full_page=True)
+
+        step("forgot password", pg)
+        pg.get_by_test_id("logout-button").click()
+        pg.wait_for_timeout(500)
+        pg.goto(BASE + "/login")
+        pg.get_by_test_id("forgot-link").click()
+        pg.get_by_test_id("forgot-email-input").fill(email)
+        pg.get_by_test_id("forgot-submit").click()
+        expect(pg.get_by_test_id("forgot-sent")).to_be_visible()
+    except Exception as e:  # report the failing step with a screenshot
+        errors.append(f"step '{state['step']}' failed: {str(e).splitlines()[0][:300]}")
+        traceback.print_exc()
+        if state["page"] is not None:
+            try:
+                errors.append(f"url at failure: {state['page'].url}")
+                state["page"].screenshot(path=str(OUT / "99-failure.png"), full_page=True)
+                body = state["page"].inner_text("body")[:400].replace("\n", " | ")
+                errors.append(f"page text: {body}")
+            except Exception:
+                pass
 
 
 with sync_playwright() as p:
-    b = p.chromium.launch()
-    for label, vp in (("desktop", {"width": 1366, "height": 860}), ("phone", {"width": 390, "height": 844})):
-        ctx = b.new_context(viewport=vp)
-        pg = ctx.new_page()
-        pg.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
-        pg.on("console", lambda m: m.type == "error" and "Failed to load resource" not in m.text and errors.append(f"console: {m.text}"))
-        step(f"landing ({label})")
-        pg.goto(BASE + "/")
-        expect(pg.get_by_test_id("landing-title")).to_be_visible(timeout=15000)
-        pg.screenshot(path=str(OUT / f"01-landing-{label}.png"), full_page=True)
-        overflow = pg.evaluate("document.documentElement.scrollWidth > window.innerWidth + 1")
-        if overflow:
-            errors.append(f"horizontal overflow on landing ({label})")
-        ctx.close()
-
-    ctx = b.new_context(viewport={"width": 1366, "height": 860})
-    pg = ctx.new_page()
-    pg.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
-    pg.route("https://checkout.stripe.com/**", lambda r: r.fulfill(body="<h1>Stripe Checkout (test stand-in)</h1>", content_type="text/html"))
-
-    step("legal pages")
-    for path in ("/terms", "/privacy", "/refund-policy", "/delete-account"):
-        pg.goto(BASE + path)
-        expect(pg.get_by_test_id("legal-page")).to_be_visible()
-    pg.screenshot(path=str(OUT / "02-privacy.png"), full_page=False)
-
-    step("sign up")
-    email = f"e2e{uuid.uuid4().hex[:6]}@example.com"
-    pg.goto(BASE + "/register")
-    pg.get_by_test_id("register-name-input").fill("E2E Tester")
-    pg.get_by_test_id("register-email-input").fill(email)
-    pg.get_by_test_id("register-password-input").fill("e2e-password-1")
-    pg.get_by_test_id("register-submit-button").click()
-    pg.wait_for_url("**/pricing?welcome=1", timeout=15000)
-    expect(pg.get_by_test_id("plan-month")).to_be_visible()
-    expect(pg.get_by_text("First 3 days free").first).to_be_visible()
-    pg.screenshot(path=str(OUT / "03-pricing-after-signup.png"), full_page=True)
-
-    step("paywall")
-    pg.goto(BASE + "/interview/new")
-    pg.wait_for_url("**/pricing", timeout=10000)
-
-    step("checkout")
-    pg.goto(BASE + "/pricing")
-    pg.get_by_test_id("checkout-stripe-month-button").click()
-    pg.wait_for_url("https://checkout.stripe.com/**", timeout=15000)
-
-    step("trial activated by webhook")
-    me = requests.Session()
-    uid = None
-    pg.goto(BASE + "/pricing")
-    uid = pg.evaluate("fetch('/api/auth/me').then(r => r.json()).then(u => u.id)")
-    webhook(uid)
-    pg.goto(BASE + "/")
-    expect(pg.get_by_test_id("nav-trial-badge")).to_be_visible(timeout=15000)
-    pg.screenshot(path=str(OUT / "04-dashboard-trial.png"), full_page=False)
-    pg.goto(BASE + "/interview/new")
-    expect(pg.get_by_test_id("page-title")).to_be_visible()
-    if "/pricing" in pg.url:
-        errors.append("interview setup still paywalled after trial started")
-
-    step("profile")
-    pg.goto(BASE + "/profile")
-    expect(pg.get_by_test_id("subscription-panel")).to_be_visible()
-    expect(pg.get_by_test_id("delete-account-panel")).to_be_visible()
-    expect(pg.get_by_test_id("manage-billing-button")).to_be_visible()
-    pg.screenshot(path=str(OUT / "05-profile.png"), full_page=True)
-
-    step("forgot password")
-    pg.get_by_test_id("logout-button").click()
-    pg.goto(BASE + "/login")
-    pg.get_by_test_id("forgot-link").click()
-    pg.get_by_test_id("forgot-email-input").fill(email)
-    pg.get_by_test_id("forgot-submit").click()
-    expect(pg.get_by_test_id("forgot-sent")).to_be_visible()
-    b.close()
+    browser = p.chromium.launch()
+    main(browser)
+    browser.close()
 
 if errors:
     for e in errors:

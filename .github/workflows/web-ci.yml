@@ -66,7 +66,7 @@ jobs:
           python -m playwright install --with-deps chromium
           cd backend && (python -m uvicorn server:app --host 127.0.0.1 --port 8000 > ../server.log 2>&1 &) && cd ..
           for i in $(seq 1 60); do curl -sf http://127.0.0.1:8000/api/ && break; sleep 1; done
-          python e2e/web_e2e.py || { tail -40 server.log | sed 's/^/::error::server: /'; exit 1; }
+          python e2e/web_e2e.py || { grep -E "ERROR|Traceback|Error:|Exception" server.log | tail -10 | sed 's/^/::error::server: /'; exit 1; }
 
       - name: Publish test screenshots (draft release, visible only to the owner)
         if: always()
