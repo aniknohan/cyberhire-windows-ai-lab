@@ -17,7 +17,7 @@ from lib.db import client, ensure_indexes  # noqa: E402
 from lib.mode import WEB, public_url  # noqa: E402
 from lib.seed import seed_all  # noqa: E402
 from models.schemas import PublicConfig  # noqa: E402
-from routers import auth, billing, content, interviews, practice, stats  # noqa: E402
+from routers import auth, billing, content, interviews, practice, reports, stats  # noqa: E402
 
 if WEB and not os.environ.get("JWT_SECRET"):
     raise RuntimeError("JWT_SECRET must be set for the website (use a long random value).")
@@ -59,7 +59,7 @@ async def public_config():
                         play_store_url=os.environ.get("PLAY_STORE_URL", ""))
 
 
-for module in (auth, interviews, content, practice, stats, billing):
+for module in (auth, interviews, content, practice, stats, billing, reports):
     api_router.include_router(module.router)
 
 def _cors_origins() -> list[str]:

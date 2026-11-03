@@ -56,8 +56,14 @@ def local_pro() -> bool:
     return not WEB
 
 
+def _free_access(user: dict) -> bool:
+    """FREE_ACCESS_EMAILS: comma-separated accounts with full access and no limits (e.g. the Google Play reviewer)."""
+    allowed = {e.strip().lower() for e in os.environ.get("FREE_ACCESS_EMAILS", "").split(",") if e.strip()}
+    return (user.get("email") or "").lower() in allowed
+
+
 def is_paid_pro(user: dict) -> bool:
-    if local_pro() or user.get("role") == "admin":
+    if local_pro() or user.get("role") == "admin" or _free_access(user):
         return True
     until = _aware(user.get("pro_until"))
     return user.get("plan") == "pro" and until is not None and until > now()
@@ -89,7 +95,7 @@ async def _interviews_since(user_id: str, since: datetime) -> int:
 
 async def usage(user: dict) -> tuple[int, int | None]:
     """(interviews used in the current allowance window, allowance) — allowance None means unlimited."""
-    if not WEB or user.get("role") == "admin":
+    if not WEB or user.get("role") == "admin" or _free_access(user):
         return 0, None
     if on_trial(user):
         start = _aware(user.get("trial_started_at")) or now() - timedelta(days=TRIAL_DAYS)

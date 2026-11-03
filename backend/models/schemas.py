@@ -537,6 +537,12 @@ class CheckoutIn(BaseModel):
     interval: Literal["month", "year"] = "month"
 
 
+class ReportIn(BaseModel):
+    text: str = Field(min_length=3, max_length=4000)
+    interview_id: Optional[str] = Field(default=None, max_length=100)
+    page: Optional[str] = Field(default=None, max_length=300)
+
+
 class PlayVerifyIn(BaseModel):
     purchase_token: str = Field(min_length=10, max_length=1000)
     product_id: Optional[str] = None

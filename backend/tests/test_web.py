@@ -285,3 +285,18 @@ def test_play_cancelled_keeps_access_until_expiry(client, fake_play):
 
 def test_play_rtdn_requires_secret(client):
     assert client.post("/api/billing/google-play/rtdn", json={}).status_code == 403
+
+
+def test_report_ai_response(client):
+    c, u, _ = new_user(client)
+    assert c.post("/api/reports", json={"text": "The interviewer said something rude", "page": "/interview/x/room"}).status_code == 200
+    rows = client.portal.call(lambda: db.reports.find({"user_id": u["id"]}, {"_id": 0}).to_list(10))
+    assert rows and rows[0]["text"].startswith("The interviewer")
+    assert TestClient(server.app).post("/api/reports", json={"text": "anon"}).status_code == 401
+
+
+def test_free_access_email(client, monkeypatch):
+    monkeypatch.setenv("FREE_ACCESS_EMAILS", "reviewer@example.com, other@example.com")
+    c, u, _ = new_user(client, email="reviewer@example.com")
+    b = c.get("/api/billing/status").json()
+    assert b["has_access"] and b["interviews_limit"] is None

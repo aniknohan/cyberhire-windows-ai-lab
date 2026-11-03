@@ -1,3 +1,4 @@
+import ReportAi from "@/components/ReportAi";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -313,6 +314,7 @@ export default function Room() {
         <span className="hidden text-slate-400 md:inline" data-testid="room-interviewer">
           {round.persona.name} · {round.persona.title}
         </span>
+        <ReportAi interviewId={iv.id} className="ml-1" />
         <div className="ml-auto flex items-center gap-3 text-slate-400">
           {iv.coach_mode && (
             <span className="flex items-center gap-1 rounded-md bg-sky-500/10 px-1.5 py-0.5 text-sky-300" data-testid="room-coach-badge">

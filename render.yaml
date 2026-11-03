@@ -40,6 +40,8 @@ services:
         sync: false
       - key: ADMIN_PASSWORD    # 10+ characters
         sync: false
+      - key: FREE_ACCESS_EMAILS  # accounts with free full access, e.g. the login you give Google Play's reviewers
+        sync: false
       - key: SUPPORT_EMAIL     # shown on the site for contact and refunds
         sync: false
       - key: RESEND_API_KEY    # optional but recommended: sends password-reset emails

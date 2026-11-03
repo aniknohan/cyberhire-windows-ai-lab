@@ -6,6 +6,7 @@ import { apiPost, clearToken } from "@/lib/api";
 import { useMe } from "@/lib/auth";
 import { daysLeft, useBilling, useConfig } from "@/lib/config";
 import { SiteFooter } from "@/components/PublicLayout";
+import ReportAi from "@/components/ReportAi";
 import { cn } from "@/lib/utils";
 import { buttonVariants } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
@@ -91,6 +92,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
               <UserRound className="size-4" />
               <span className="hidden lg:inline" data-testid="nav-user-name">{me?.name}</span>
             </Link>
+            <ReportAi />
             <button onClick={logout} className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-white/[0.04] hover:text-white" data-testid="logout-button" aria-label="Sign out">
               <LogOut className="size-4" />
             </button>
