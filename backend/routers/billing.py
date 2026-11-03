@@ -20,11 +20,12 @@ import httpx
 import stripe
 from fastapi import APIRouter, Depends, HTTPException, Request
 
+from lib import google_play as play
 from lib.auth import current_user
 from lib.db import db
 from lib.limits import AI_CALLS_PER_DAY, AI_CALLS_PER_MINUTE
 from lib.mode import WEB, env_int, public_url
-from models.schemas import BillingStatus, CheckoutIn, CheckoutOut, OkOut, PaymentStatusOut, PortalOut
+from models.schemas import BillingStatus, CheckoutIn, CheckoutOut, OkOut, PaymentStatusOut, PlayVerifyIn, PortalOut
 
 router = APIRouter(tags=["billing"])
 logger = logging.getLogger(__name__)
@@ -129,9 +130,9 @@ async def require_ai(user: dict = Depends(current_user)) -> dict:
 async def set_entitlement(user_id: str, provider: str, status: str, until: datetime | None, **fields) -> None:
     active = status in ACTIVE and until is not None and until > now()
     upd = {"plan": "pro" if active else "free", "subscription_status": status, "billing_provider": provider,
-           "pro_until": (until + GRACE) if active else min(until or now(), now()), **fields}
-    if status == "trialing":
-        upd["trial_used"] = True
+           "pro_until": (until + GRACE) if active else min(until or now(), now()),
+           "trial_used": True,  # anyone who has had a subscription (trial or paid) isn't offered another free trial
+           **fields}
     await db.users.update_one({"id": user_id}, {"$set": upd})
 
 
@@ -203,8 +204,85 @@ async def _retrieve_and_sync(sub_id: str | None) -> None:
     await sync_stripe_subscription(sub)
 
 
+# ---------------- Google Play ----------------
+async def sync_play_purchase(user: dict, purchase_token: str) -> dict:
+    """Check a Google Play subscription with Google and copy its state onto the user. Returns the updated user."""
+    if not play.configured():
+        raise HTTPException(status_code=503, detail="Google Play subscriptions aren't set up on the server yet.")
+    owner = await db.users.find_one({"play_purchase_token": purchase_token}, {"_id": 0, "id": 1})
+    if owner and owner["id"] != user["id"]:
+        raise HTTPException(status_code=409, detail="This Google Play subscription belongs to another CyberHire account. Sign in with that account.")
+    try:
+        info = play.interpret(await play.get_subscription(purchase_token))
+    except play.PlayError as e:
+        raise HTTPException(status_code=e.status, detail=str(e))
+    if info["account_id"] and info["account_id"] != user["id"]:
+        raise HTTPException(status_code=409, detail="This Google Play subscription belongs to another CyberHire account. Sign in with that account.")
+    # A newer active Stripe subscription is never replaced by an ended Play one.
+    if info["status"] not in ACTIVE and user.get("billing_provider") == "stripe" and is_paid_pro(user):
+        return user
+    fields = {"play_purchase_token": purchase_token, "play_product_id": info["product_id"], "play_checked_at": now(),
+              "cancel_at_period_end": info["cancel_at_period_end"], "billing_interval": "month"}
+    if info["status"] == "trialing" and not user.get("trial_started_at"):
+        fields["trial_started_at"] = now()
+    await set_entitlement(user["id"], "google_play", info["status"], info["expiry"], **fields)
+    if info["needs_ack"] and info["status"] in ACTIVE:
+        await play.acknowledge(info["product_id"], purchase_token)
+    return await db.users.find_one({"id": user["id"]}, {"_id": 0}) or user
+
+
+@router.post("/billing/google-play/verify", response_model=OkOut)
+async def play_verify(body: PlayVerifyIn, user: dict = Depends(current_user)):
+    """Called by the Android app right after a purchase, and on "Restore purchase"."""
+    await sync_play_purchase(user, body.purchase_token)
+    return OkOut()
+
+
+async def _refresh_play_if_due(user: dict) -> dict:
+    """Renewals, cancellations and expiries happen at Google: re-check a Play subscription every few hours
+    and whenever its period has run out, so access always matches what Google says."""
+    if user.get("billing_provider") != "google_play" or not user.get("play_purchase_token") or not play.configured():
+        return user
+    checked = _aware(user.get("play_checked_at"))
+    until = _aware(user.get("pro_until"))
+    due = checked is None or now() - checked > timedelta(hours=6) or (until is not None and until <= now() and now() - checked > timedelta(minutes=5))
+    if not due:
+        return user
+    try:
+        return await sync_play_purchase(user, user["play_purchase_token"])
+    except HTTPException as e:
+        logger.warning("Play refresh for %s failed: %s", user.get("id"), e.detail)
+        await db.users.update_one({"id": user["id"]}, {"$set": {"play_checked_at": now()}})
+        return user
+
+
+@router.post("/billing/google-play/rtdn")
+async def play_rtdn(request: Request, token: str = ""):
+    """Optional: Google Play real-time developer notifications (Pub/Sub push subscription) for instant updates."""
+    secret = os.environ.get("GOOGLE_PLAY_RTDN_TOKEN", "")
+    if not secret or token != secret:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    import base64
+    import json as _json
+    try:
+        msg = (await request.json()).get("message") or {}
+        data = _json.loads(base64.b64decode(msg.get("data") or "e30=").decode() or "{}")
+    except Exception:
+        return {"status": "ignored"}
+    ptoken = (data.get("subscriptionNotification") or {}).get("purchaseToken")
+    if ptoken:
+        u = await db.users.find_one({"play_purchase_token": ptoken}, {"_id": 0})
+        if u:
+            try:
+                await sync_play_purchase(u, ptoken)
+            except HTTPException as e:
+                logger.warning("RTDN sync failed: %s", e.detail)
+    return {"status": "ok"}
+
+
 @router.get("/billing/status", response_model=BillingStatus)
 async def billing_status(user: dict = Depends(current_user)):
+    user = await _refresh_play_if_due(user)
     paid, trial = is_paid_pro(user), on_trial(user)
     used, limit = await usage(user)
     return BillingStatus(
@@ -215,7 +293,7 @@ async def billing_status(user: dict = Depends(current_user)):
         pro_until=_aware(user.get("pro_until")) if paid else None, provider=user.get("billing_provider"),
         interval=user.get("billing_interval"), cancel_at_period_end=bool(user.get("cancel_at_period_end")),
         monthly_price_label=PLANS["month"]["label"], yearly_price_label=PLANS["year"]["label"],
-        stripe_enabled=bool(stripe.api_key), paypal_enabled=bool(os.environ.get("PAYPAL_CLIENT_ID") and os.environ.get("PAYPAL_SECRET")),
+        stripe_enabled=bool(stripe.api_key), play_enabled=play.configured(), play_product_id=play.product_id(), paypal_enabled=bool(os.environ.get("PAYPAL_CLIENT_ID") and os.environ.get("PAYPAL_SECRET")),
         interviews_used=used, interviews_limit=limit,
     )
 

@@ -1,0 +1,7 @@
+{
+  "packageName": "io.github.aniknohan.cyberhire",
+  "appName": "CyberHire",
+  "versionName": "1.0.0",
+  "apiBase": "https://cyberhire.onrender.com",
+  "subscriptionProductId": "cyberhire_pro"
+}

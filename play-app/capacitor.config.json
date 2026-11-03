@@ -1,0 +1,10 @@
+{
+  "appId": "io.github.aniknohan.cyberhire",
+  "appName": "CyberHire",
+  "webDir": "www",
+  "android": {
+    "backgroundColor": "#090D14",
+    "allowMixedContent": false,
+    "webContentsDebuggingEnabled": false
+  }
+}

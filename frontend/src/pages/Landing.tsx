@@ -22,8 +22,8 @@ const STEPS = [
 ];
 
 const FAQ = [
-  { q: "How does the free trial work?", a: "Choose monthly or yearly and add a card. You're not charged for the first 3 days. If you cancel before the trial ends, you pay nothing; otherwise your plan starts automatically." },
-  { q: "Can I cancel anytime?", a: "Yes. Cancel anytime from your Profile (Manage billing). You keep access until the end of the period you've paid for." },
+  { q: "How does the free trial work?", a: "Start your subscription with a payment method on file. You're not charged for the first 3 days. If you cancel before the trial ends, you pay nothing; otherwise your plan starts automatically." },
+  { q: "Can I cancel anytime?", a: "Yes. Cancel in Google Play (Payments & subscriptions) if you subscribed in the Android app, or from your Profile if you subscribed on the website. You keep access until the end of the period you've paid for." },
   { q: "Who is CyberHire for?", a: "People preparing for SOC Analyst and other blue-team cybersecurity interviews, from career changers going for their first L1 role to analysts moving up to L2 and L3." },
   { q: "Do I need an API key or any setup?", a: "No. Everything is included in your plan. You only need a browser with a microphone; a camera is optional." },
   { q: "Is my data private?", a: "Your interviews, recordings and reports are private to your account, and you can delete recordings or your whole account at any time. See the Privacy policy." },
@@ -34,6 +34,9 @@ export default function Landing() {
   const nav = useNavigate();
   const { data: cfg } = useConfig();
   const trialDays = cfg?.trial_days ?? 3;
+  // Card payments not set up on the website: CyberHire Pro is sold through the Android app on Google Play.
+  const playOnly = !!cfg && !cfg.web_checkout;
+  const playUrl = cfg?.play_store_url || "";
   return (
     <PublicLayout>
       <section className="relative overflow-hidden">
@@ -48,12 +51,20 @@ export default function Landing() {
               Practise realistic voice interviews with a recruiter, senior analyst, incident response lead and SOC manager. Get scored, get a hiring decision, and know exactly what to fix.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3">
-              <Link to="/register" className={cn(buttonVariants({ size: "lg" }), "h-12 px-6 text-base")} data-testid="hero-cta">
-                Start your {trialDays}-day free trial <ArrowRight />
-              </Link>
+              {playOnly && playUrl ? (
+                <a href={playUrl} className={cn(buttonVariants({ size: "lg" }), "h-12 px-6 text-base")} data-testid="hero-cta">
+                  Get it on Google Play <ArrowRight />
+                </a>
+              ) : (
+                <Link to="/register" className={cn(buttonVariants({ size: "lg" }), "h-12 px-6 text-base")} data-testid="hero-cta">
+                  Start your {trialDays}-day free trial <ArrowRight />
+                </Link>
+              )}
               <a href="#how" className={cn(buttonVariants({ size: "lg", variant: "secondary" }), "h-12 px-6 text-base")}>See how it works</a>
             </div>
-            <p className="mt-3 text-xs text-slate-500">Then $19.99/month or $159/year. Cancel anytime before the trial ends and pay nothing.</p>
+            <p className="mt-3 text-xs text-slate-500">
+              {playOnly ? `${trialDays} days free, then $19.99/month in the Android app. Cancel anytime in Google Play.` : "Then $19.99/month or $159/year. Cancel anytime before the trial ends and pay nothing."}
+            </p>
           </div>
           <div className="relative">
             <div className="absolute -inset-4 rounded-3xl bg-sky-500/10 blur-2xl" />
@@ -121,8 +132,20 @@ export default function Landing() {
         <div className="mx-auto max-w-6xl px-4 sm:px-6">
           <h2 className="font-heading text-3xl font-semibold text-white sm:text-4xl">Simple pricing</h2>
           <p className="mt-3 mb-10 max-w-2xl text-slate-400">Start with {trialDays} days free. Cancel anytime.</p>
-          <PlanCards onChoose={() => nav("/register")} ctaFor={() => `Start ${trialDays}-day free trial`} />
-          <div className="mt-6 flex items-center gap-2 text-xs text-slate-500"><ShieldCheck className="size-4" /> Secure payments by Stripe. One free trial per person.</div>
+          {playOnly ? (
+            <div className="max-w-xl rounded-2xl border border-sky-500/30 bg-white/[0.02] p-6">
+              <div className="font-mono text-[11px] uppercase tracking-[0.16em] text-sky-400/80">CyberHire Pro</div>
+              <div className="mt-2 font-heading text-4xl font-semibold text-white">$19.99<span className="text-base font-normal text-slate-400"> / month</span></div>
+              <p className="mt-2 text-sm text-sky-300">First {trialDays} days free</p>
+              <p className="mt-3 text-sm text-slate-400">Subscribe in the CyberHire Android app. Your account also works on this website.</p>
+              {playUrl && <a href={playUrl} className={cn(buttonVariants({ size: "lg" }), "mt-5 h-11 w-full")}>Get it on Google Play</a>}
+            </div>
+          ) : (
+            <>
+              <PlanCards onChoose={() => nav("/register")} ctaFor={() => `Start ${trialDays}-day free trial`} />
+              <div className="mt-6 flex items-center gap-2 text-xs text-slate-500"><ShieldCheck className="size-4" /> Secure payments by Stripe. One free trial per person.</div>
+            </>
+          )}
         </div>
       </section>
 

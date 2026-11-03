@@ -1,0 +1,14 @@
+{
+  "name": "cyberhire-play",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CyberHire for Google Play: the CyberHire app screens + Google Play subscriptions, talking to the CyberHire server.",
+  "dependencies": {
+    "@capacitor/android": "^8.0.0",
+    "@capacitor/core": "^8.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^8.0.0"
+  }
+}

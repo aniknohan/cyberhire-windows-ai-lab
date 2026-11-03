@@ -17,3 +17,4 @@ stripe==14.4.1
 # Optional: MongoDB instead of the built-in database (set MONGO_URL)
 motor==3.7.1
 pymongo==4.18.2
+cryptography>=42.0.8  # Google Play service-account signing (RS256)

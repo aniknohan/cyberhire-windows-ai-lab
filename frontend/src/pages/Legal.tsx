@@ -38,7 +38,7 @@ export function Terms() {
       </ul>
       <h2>Subscriptions, free trial and billing</h2>
       <ul>
-        <li>CyberHire Pro costs $19.99 per month or $159 per year (plus any applicable tax), billed in advance.</li>
+        <li>CyberHire Pro costs $19.99 per month (plus any applicable tax), billed in advance. Where offered on the website, a yearly plan costs $159 per year. Prices in the Android app are shown by Google Play in your local currency.</li>
         <li>New subscribers get one free trial of 3 days. A payment method is required to start it. Unless you cancel before the trial ends, your subscription starts automatically and you're charged the plan price.</li>
         <li>Subscriptions renew automatically at the end of each billing period until you cancel. You can cancel anytime from your Profile (website) or in Google Play (if you subscribed in the Android app). Cancellation takes effect at the end of the current period, and you keep access until then.</li>
         <li>Website payments are processed by Stripe; in-app purchases are processed by Google Play. We never see or store your full card number.</li>

@@ -54,7 +54,9 @@ async def public_config():
     return PublicConfig(mode="web" if WEB else "desktop", trial_days=billing.TRIAL_DAYS,
                         monthly_price_label=billing.PLANS["month"]["label"], yearly_price_label=billing.PLANS["year"]["label"],
                         google_login=bool(not WEB and os.environ.get("EMERGENT_GOOGLE_LOGIN")),
-                        support_email=os.environ.get("SUPPORT_EMAIL", ""))
+                        support_email=os.environ.get("SUPPORT_EMAIL", ""),
+                        web_checkout=bool(os.environ.get("STRIPE_SECRET_KEY")),
+                        play_store_url=os.environ.get("PLAY_STORE_URL", ""))
 
 
 for module in (auth, interviews, content, practice, stats, billing):

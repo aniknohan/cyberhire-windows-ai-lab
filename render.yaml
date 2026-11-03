@@ -24,9 +24,17 @@ services:
         sync: false
       - key: ANTHROPIC_API_KEY # optional: use Claude for interviewing/scoring
         sync: false
-      - key: STRIPE_SECRET_KEY # sk_live_... (or sk_test_... while testing)
+      - key: GOOGLE_PLAY_PACKAGE   # the Android app's package name
+        value: io.github.aniknohan.cyberhire
+      - key: GOOGLE_PLAY_PRODUCT_ID   # the subscription's product ID in Play Console
+        value: cyberhire_pro
+      - key: GOOGLE_PLAY_SERVICE_ACCOUNT_JSON  # paste the whole JSON key file of the Play service account
         sync: false
-      - key: STRIPE_WEBHOOK_SECRET  # whsec_... from the Stripe webhook you create for <PUBLIC_URL>/api/stripe/webhook
+      - key: PLAY_STORE_URL        # optional: the app's Play Store link, shown on the website
+        sync: false
+      - key: STRIPE_SECRET_KEY # optional: only for selling on the website too (sk_live_...)
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET  # optional: whsec_... for <PUBLIC_URL>/api/stripe/webhook
         sync: false
       - key: ADMIN_EMAIL       # your own login with admin rights (free access)
         sync: false

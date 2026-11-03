@@ -397,6 +397,8 @@ export interface PublicConfig {
   yearly_price_label: string;
   google_login: boolean;
   support_email: string;
+  web_checkout: boolean;
+  play_store_url: string;
 }
 
 export interface PortalOut {
@@ -421,6 +423,8 @@ export interface BillingStatus {
   monthly_price_label: string;
   yearly_price_label: string;
   stripe_enabled: boolean;
+  play_enabled: boolean;
+  play_product_id: string;
   paypal_enabled: boolean;
 }
 

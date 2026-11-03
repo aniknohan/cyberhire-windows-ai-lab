@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Check, CheckCircle2, Clock, CreditCard, ExternalLink, Loader2, ShieldCheck, XCircle } from "lucide-react";
+import { Check, CheckCircle2, Clock, CreditCard, ExternalLink, Loader2, RotateCcw, ShieldCheck, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { ApiError, IS_NATIVE, WEB_ORIGIN, apiGet, apiPost } from "@/lib/api";
-import { daysLeft, useBilling } from "@/lib/config";
+import { daysLeft, useBilling, useConfig } from "@/lib/config";
+import { useMe } from "@/lib/auth";
+import { manageSubscriptionUrl, periodWord, playBilling, type PlayProduct } from "@/lib/playBilling";
 import type { BillingStatus, CheckoutOut, PaymentStatusOut, PortalOut } from "@/lib/types";
 import AppShell, { PageHeader } from "@/components/AppShell";
 import { Eyebrow, Panel } from "@/components/common";
@@ -71,13 +73,21 @@ export function SubscriptionSummary({ b }: { b: BillingStatus }) {
           {b.interviews_used} of {b.interviews_limit} interviews used {b.on_trial ? "in your trial" : "in the last 30 days"}
         </div>
       )}
-      {b.provider === "stripe" && (
+      {b.provider === "stripe" && !IS_NATIVE && (
         <Button variant="secondary" size="sm" onClick={() => manage.mutate()} disabled={manage.isPending} data-testid="manage-billing-button">
           {manage.isPending ? <Loader2 className="animate-spin" /> : <ExternalLink />} Manage billing, card or cancel
         </Button>
       )}
+      {b.provider === "stripe" && IS_NATIVE && <p className="text-xs text-slate-400">This plan was bought on the CyberHire website. Manage it there.</p>}
       {b.provider === "google_play" && (
-        <p className="text-xs text-slate-400">Manage or cancel in the Google Play Store app → Payments &amp; subscriptions → Subscriptions.</p>
+        <div className="space-y-2">
+          {IS_NATIVE && (
+            <a href={manageSubscriptionUrl(b.play_product_id || "cyberhire_pro")} className={buttonVariants({ variant: "secondary", size: "sm" })} data-testid="manage-play-button">
+              <ExternalLink /> Manage or cancel in Google Play
+            </a>
+          )}
+          <p className="text-xs text-slate-400">Billed by Google Play. You can also manage it in the Play Store app → Payments &amp; subscriptions → Subscriptions.</p>
+        </div>
       )}
     </div>
   );
@@ -126,10 +136,130 @@ export function PlanCards({ b, onChoose, busyInterval, ctaFor }: {
   );
 }
 
+function playErr(e: unknown): string {
+  const m = (e as { message?: string; code?: string })?.message || "";
+  if (/cancel/i.test(m) || (e as { code?: string })?.code === "USER_CANCELED") return "";
+  if (e instanceof ApiError) return detail(e, "Couldn't confirm the purchase.");
+  return m || "Google Play couldn't complete the purchase. Please try again.";
+}
+
+/** Android (Play Store) app: subscribe with Google Play. No web checkout links here, as Play policy requires. */
+function NativePricing() {
+  const qc = useQueryClient();
+  const [params] = useSearchParams();
+  const { data: me } = useMe();
+  const { data: b } = useBilling();
+  const plugin = playBilling();
+  const productId = b?.play_product_id || "cyberhire_pro";
+  const [product, setProduct] = useState<PlayProduct | null>(null);
+  const [busy, setBusy] = useState<"" | "buy" | "restore">("");
+  const restored = useRef(false);
+
+  const verify = async (token: string) => {
+    await apiPost("/billing/google-play/verify", { purchase_token: token, product_id: productId });
+    const fresh = await apiGet<BillingStatus>("/billing/status");
+    qc.setQueryData(["billing"], fresh);
+    return fresh;
+  };
+  const restore = async (quiet: boolean) => {
+    if (!plugin) return;
+    if (!quiet) setBusy("restore");
+    try {
+      const { purchases } = await plugin.getPurchases();
+      let ok = false;
+      for (const p of purchases) {
+        try {
+          if ((await verify(p.purchaseToken)).has_access) ok = true;
+        } catch (e) {
+          if (!quiet) toast.error(playErr(e) || "Couldn't restore this purchase.");
+        }
+      }
+      if (!quiet) (ok ? toast.success("Subscription restored.") : !purchases.length && toast("No Google Play subscription found on this Google account."));
+    } catch (e) {
+      if (!quiet) toast.error(playErr(e) || "Couldn't reach Google Play.");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  useEffect(() => {
+    if (!plugin) return;
+    plugin.getProduct({ productId }).then(setProduct).catch(() => setProduct({ available: false, productId }));
+    if (!restored.current && b && !b.has_access) {
+      restored.current = true;
+      void restore(true); // reinstall / new phone: pick up an existing subscription silently
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plugin, productId, b?.has_access]);
+
+  const buy = async () => {
+    if (!plugin || !me) return;
+    setBusy("buy");
+    try {
+      const p = await plugin.subscribe({ productId, accountId: me.id });
+      const fresh = await verify(p.purchaseToken);
+      if (fresh.has_access) toast.success(fresh.on_trial ? "Your free trial has started." : "Welcome to CyberHire Pro!");
+    } catch (e) {
+      const m = playErr(e);
+      if (m) toast.error(m);
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const trialDays = product?.trialDays ?? 0;
+  const price = product?.price ?? "$19.99";
+  const unit = periodWord(product?.billingPeriod);
+  const welcome = params.get("welcome") === "1";
+  return (
+    <AppShell>
+      <PageHeader
+        eyebrow={welcome ? "Welcome to CyberHire" : "CyberHire Pro"}
+        title={b?.is_pro ? "Your plan" : trialDays ? `Try CyberHire Pro free for ${trialDays} days` : "Subscribe to CyberHire Pro"}
+        desc={b?.is_pro ? "Thanks for practising with CyberHire." : trialDays ? `Then ${price} per ${unit}. Cancel anytime in Google Play before the trial ends and you won't be charged.` : `${price} per ${unit}, billed by Google Play. Cancel anytime.`}
+      />
+      {b?.is_pro ? (
+        <Panel className="max-w-2xl" data-testid="pro-active"><SubscriptionSummary b={b} /></Panel>
+      ) : (
+        <Panel className="max-w-xl space-y-4 border-sky-500/30" data-testid="play-plan">
+          <div className="flex items-center justify-between">
+            <Eyebrow className="text-sky-400/80">Pro Monthly</Eyebrow>
+            {trialDays > 0 && <span className="rounded-full bg-emerald-400/10 px-2 py-0.5 font-mono text-[10px] tracking-wider text-emerald-300">{trialDays} DAYS FREE</span>}
+          </div>
+          <div className="font-heading text-4xl font-semibold text-white">{price}<span className="text-base font-normal text-slate-400"> / {unit}</span></div>
+          <ul className="space-y-2 text-sm text-slate-200">
+            {PRO_FEATURES.map((f) => <li key={f} className="flex gap-2"><Check className="mt-0.5 size-4 shrink-0 text-sky-400" />{f}</li>)}
+          </ul>
+          {!plugin || product?.available === false ? (
+            <p className="text-sm text-amber-200" data-testid="play-unavailable">Subscriptions aren't available right now. Make sure the app was installed from Google Play and you're signed in to the Play Store, then try again.</p>
+          ) : (
+            <Button size="lg" className="h-12 w-full text-base" onClick={buy} disabled={!!busy || !product} data-testid="play-subscribe-button">
+              {busy === "buy" || !product ? <Loader2 className="animate-spin" /> : null}
+              {trialDays ? `Start ${trialDays}-day free trial` : "Subscribe"}
+            </Button>
+          )}
+          <p className="text-[11px] leading-relaxed text-slate-500">
+            {trialDays ? `No charge today. After ${trialDays} days, ${price} per ${unit} is charged to your Google Play payment method and renews automatically until you cancel. ` : `${price} per ${unit}, renewing automatically until you cancel. `}
+            Cancel anytime in Google Play → Payments &amp; subscriptions. See the <Link to="/terms" className="text-sky-400">Terms</Link> and <Link to="/privacy" className="text-sky-400">Privacy policy</Link>.
+          </p>
+          <Button variant="ghost" size="sm" onClick={() => restore(false)} disabled={!!busy || !plugin} data-testid="play-restore-button">
+            {busy === "restore" ? <Loader2 className="animate-spin" /> : <RotateCcw />} Restore purchase
+          </Button>
+        </Panel>
+      )}
+    </AppShell>
+  );
+}
+
 export default function Pricing() {
+  return IS_NATIVE ? <NativePricing /> : <WebPricing />;
+}
+
+function WebPricing() {
   const qc = useQueryClient();
   const [params] = useSearchParams();
   const { data: b } = useBilling();
+  const { data: cfg } = useConfig();
   const checkout = useMutation({
     mutationFn: (interval: Interval) =>
       apiPost<CheckoutOut>("/billing/stripe/checkout", { origin_url: IS_NATIVE ? WEB_ORIGIN : window.location.origin, interval }),
@@ -146,6 +276,22 @@ export default function Pricing() {
   }, [params]);
 
   const welcome = params.get("welcome") === "1";
+  if (cfg && !cfg.web_checkout && b && !b.is_pro) {
+    // Website without card payments set up: subscriptions are sold in the Android app (Google Play).
+    return (
+      <AppShell>
+        <PageHeader eyebrow={welcome ? "Welcome to CyberHire" : "Plans"} title="Get CyberHire Pro on Android" desc="Subscribe in the CyberHire app on Google Play: 3 days free, then $19.99 a month. Then sign in here with the same account to practise on your computer too." />
+        <Panel className="max-w-xl space-y-4" data-testid="get-on-play">
+          <ul className="space-y-2 text-sm text-slate-200">{PRO_FEATURES.map((f) => <li key={f} className="flex gap-2"><Check className="mt-0.5 size-4 shrink-0 text-sky-400" />{f}</li>)}</ul>
+          {cfg.play_store_url ? (
+            <a href={cfg.play_store_url} className={cn(buttonVariants({ size: "lg" }), "h-11 w-full")} data-testid="play-store-link">Get it on Google Play</a>
+          ) : (
+            <p className="text-sm text-slate-400">The Android app is coming to Google Play soon.</p>
+          )}
+        </Panel>
+      </AppShell>
+    );
+  }
   return (
     <AppShell>
       <PageHeader

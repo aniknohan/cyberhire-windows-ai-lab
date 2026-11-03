@@ -193,3 +193,95 @@ def test_security_headers(client):
     r = client.get("/api/config")
     assert r.headers.get("x-content-type-options") == "nosniff"
     assert "strict-transport-security" in r.headers
+
+
+# ---------------- Google Play ----------------
+def _play_sub(user_id, state="SUBSCRIPTION_STATE_ACTIVE", trial=True, days=3, ack=True, auto=True):
+    exp = (datetime.now(timezone.utc) + timedelta(days=days)).isoformat().replace("+00:00", "Z")
+    return {"subscriptionState": state, "acknowledgementState": "ACKNOWLEDGEMENT_STATE_PENDING" if ack else "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED",
+            "externalAccountIdentifiers": {"obfuscatedExternalAccountId": user_id},
+            "lineItems": [{"productId": "cyberhire_pro", "expiryTime": exp, "autoRenewingPlan": {"autoRenewEnabled": auto},
+                           "offerDetails": {"basePlanId": "monthly", "offerId": "free-trial" if trial else None},
+                           **({"offerPhase": {"freeTrial": {}}} if trial else {"offerPhase": {"basePrice": {}}})}]}
+
+
+@pytest.fixture
+def fake_play(monkeypatch):
+    from lib import google_play as play
+    state = {"subs": {}, "acked": []}
+    monkeypatch.setattr(play, "configured", lambda: True)
+
+    async def get_sub(tok):
+        if tok not in state["subs"]:
+            raise play.PlayError("Google Play doesn't recognise this purchase.", 400)
+        return state["subs"][tok]
+
+    async def ack(product, tok):
+        state["acked"].append(tok)
+    monkeypatch.setattr(play, "get_subscription", get_sub)
+    monkeypatch.setattr(play, "acknowledge", ack)
+    return state
+
+
+def test_play_trial_purchase_unlocks_and_is_acknowledged(client, fake_play):
+    c, u, _ = new_user(client)
+    tok = "play-token-" + uuid.uuid4().hex
+    fake_play["subs"][tok] = _play_sub(u["id"])
+    assert c.post("/api/billing/google-play/verify", json={"purchase_token": tok}).status_code == 200
+    b = c.get("/api/billing/status").json()
+    assert b["has_access"] and b["on_trial"] and b["provider"] == "google_play" and b["interviews_limit"] == 3
+    assert tok in fake_play["acked"]
+    # Stripe portal/cancel point Play subscribers to the Play Store
+    assert c.post("/api/billing/cancel").status_code == 400
+
+
+def test_play_token_cannot_unlock_another_account(client, fake_play):
+    a, ua, _ = new_user(client)
+    b_, ub, _ = new_user(client)
+    tok = "play-token-" + uuid.uuid4().hex
+    fake_play["subs"][tok] = _play_sub(ua["id"])
+    assert a.post("/api/billing/google-play/verify", json={"purchase_token": tok}).status_code == 200
+    assert b_.post("/api/billing/google-play/verify", json={"purchase_token": tok}).status_code == 409
+    other = "play-token-" + uuid.uuid4().hex
+    fake_play["subs"][other] = _play_sub("someone-else")
+    assert b_.post("/api/billing/google-play/verify", json={"purchase_token": other}).status_code == 409
+    assert not b_.get("/api/billing/status").json()["has_access"]
+
+
+def test_play_unknown_token_rejected(client, fake_play):
+    c, u, _ = new_user(client)
+    assert c.post("/api/billing/google-play/verify", json={"purchase_token": "nonexistent-token-123"}).status_code == 400
+
+
+def test_play_renewal_and_expiry_refresh(client, fake_play):
+    c, u, _ = new_user(client)
+    tok = "play-token-" + uuid.uuid4().hex
+    fake_play["subs"][tok] = _play_sub(u["id"], trial=False, days=30, ack=False)
+    c.post("/api/billing/google-play/verify", json={"purchase_token": tok})
+    assert c.get("/api/billing/status").json()["plan"] == "pro"
+
+    async def age():
+        await db.users.update_one({"id": u["id"]}, {"$set": {"play_checked_at": datetime.now(timezone.utc) - timedelta(hours=7),
+                                                              "pro_until": datetime.now(timezone.utc) - timedelta(minutes=1)}})
+    # Google says it expired
+    fake_play["subs"][tok] = _play_sub(u["id"], state="SUBSCRIPTION_STATE_EXPIRED", trial=False, days=-1, ack=False)
+    client.portal.call(age)
+    b = c.get("/api/billing/status").json()
+    assert not b["has_access"] and b["plan"] == "expired"
+    # ...and later it was renewed (e.g. payment fixed)
+    fake_play["subs"][tok] = _play_sub(u["id"], trial=False, days=30, ack=False)
+    client.portal.call(age)
+    assert c.get("/api/billing/status").json()["has_access"]
+
+
+def test_play_cancelled_keeps_access_until_expiry(client, fake_play):
+    c, u, _ = new_user(client)
+    tok = "play-token-" + uuid.uuid4().hex
+    fake_play["subs"][tok] = _play_sub(u["id"], state="SUBSCRIPTION_STATE_CANCELED", trial=False, days=10, auto=False)
+    c.post("/api/billing/google-play/verify", json={"purchase_token": tok})
+    b = c.get("/api/billing/status").json()
+    assert b["has_access"] and b["cancel_at_period_end"]
+
+
+def test_play_rtdn_requires_secret(client):
+    assert client.post("/api/billing/google-play/rtdn", json={}).status_code == 403

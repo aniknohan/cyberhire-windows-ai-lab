@@ -3,6 +3,7 @@ import AuthCallback from "@/pages/AuthCallback";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthLoader, RequireAuth, RequirePlan, useMe } from "@/lib/auth";
 import { useConfig } from "@/lib/config";
+import { IS_NATIVE } from "@/lib/api";
 import Landing from "@/pages/Landing";
 import { DeleteAccountInfo, Privacy, RefundPolicy, Terms } from "@/pages/Legal";
 import { ForgotPassword, ResetPassword } from "@/pages/Account";
@@ -30,7 +31,7 @@ function Home() {
   const { data: cfg, isLoading: cfgLoading } = useConfig();
   const { data: me, isLoading } = useMe();
   if (cfgLoading || isLoading) return <AuthLoader />;
-  if (!me) return cfg?.mode === "web" ? <Landing /> : <Navigate to="/login" replace />;
+  if (!me) return cfg?.mode === "web" && !IS_NATIVE ? <Landing /> : <Navigate to="/login" replace />;
   return paid(<Dashboard />);
 }
 

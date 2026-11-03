@@ -527,12 +527,19 @@ class BillingStatus(BaseModel):
     monthly_price_label: str
     yearly_price_label: str
     stripe_enabled: bool
+    play_enabled: bool = False
+    play_product_id: str = ""
     paypal_enabled: bool
 
 
 class CheckoutIn(BaseModel):
     origin_url: str = Field(min_length=8, max_length=300)
     interval: Literal["month", "year"] = "month"
+
+
+class PlayVerifyIn(BaseModel):
+    purchase_token: str = Field(min_length=10, max_length=1000)
+    product_id: Optional[str] = None
 
 
 class PortalOut(BaseModel):
@@ -560,6 +567,8 @@ class PublicConfig(BaseModel):
     yearly_price_label: str
     google_login: bool = False
     support_email: str = ""
+    web_checkout: bool = False
+    play_store_url: str = ""
 
 
 class CheckoutOut(BaseModel):

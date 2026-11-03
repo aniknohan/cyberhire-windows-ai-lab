@@ -1,0 +1,92 @@
+name: Build Google Play app
+
+on:
+  push:
+    branches: [main]
+    paths: ['play-app/**', 'frontend/**', '.github/workflows/build-play.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version: 22 }
+      - uses: actions/setup-java@v5
+        with: { distribution: temurin, java-version: 21 }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+
+      - name: Read app settings
+        id: cfg
+        run: |
+          echo "api=$(jq -r .apiBase play-app/config.json)" >> $GITHUB_OUTPUT
+          echo "pkg=$(jq -r .packageName play-app/config.json)" >> $GITHUB_OUTPUT
+          echo "ver=$(jq -r .versionName play-app/config.json)" >> $GITHUB_OUTPUT
+
+      - name: Bundle interviewer photos
+        continue-on-error: true
+        run: python scripts/bundle_images.py
+
+      - name: Build the app screens (pointing at the CyberHire server)
+        working-directory: frontend
+        env:
+          VITE_API_BASE: ${{ steps.cfg.outputs.api }}
+          VITE_PLAY_PACKAGE: ${{ steps.cfg.outputs.pkg }}
+        run: |
+          npx --yes yarn@1.22.22 install --frozen-lockfile --network-timeout 600000
+          npx --yes yarn@1.22.22 vite build --outDir ../play-app/www --emptyOutDir
+          rm -rf ../play-app/www/downloads
+
+      - name: Android project
+        working-directory: play-app
+        run: |
+          npm install --no-audit --no-fund
+          npx cap add android
+
+      - name: Upload key (optional; otherwise the bundle is signed after the build)
+        env:
+          KS: ${{ secrets.PLAY_UPLOAD_KEYSTORE_B64 }}
+          PW: ${{ secrets.PLAY_UPLOAD_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KS" ]; then
+            echo "$KS" | base64 -d > "$RUNNER_TEMP/upload.jks"
+            { echo "CH_KEYSTORE=$RUNNER_TEMP/upload.jks"; echo "CH_KEYSTORE_PASSWORD=$PW"; echo "CH_KEY_PASSWORD=$PW"; echo "CH_KEY_ALIAS=cyberhire-upload"; } >> $GITHUB_ENV
+          fi
+
+      - name: Billing plugin, permissions, version
+        working-directory: play-app
+        run: node scripts/android-setup.js
+
+      - name: Icons and splash
+        working-directory: play-app
+        continue-on-error: true
+        run: npx @capacitor/assets generate --android --iconBackgroundColor '#090D14' --iconBackgroundColorDark '#090D14' --splashBackgroundColor '#090D14' --splashBackgroundColorDark '#090D14'
+
+      - name: Sync
+        working-directory: play-app
+        run: npx cap sync android
+
+      - name: Build app bundle (.aab) and test APK
+        working-directory: play-app/android
+        run: |
+          chmod +x gradlew
+          ./gradlew bundleRelease assembleDebug --no-daemon --stacktrace 2>&1 | tee ../../gradle.log | tail -40
+          test -f app/build/outputs/bundle/release/app-release.aab || { grep -E "error:|FAILURE|What went wrong" -A3 ../../gradle.log | head -40 | sed 's/^/::error::/'; exit 1; }
+          V=${{ steps.cfg.outputs.ver }}
+          if [ -n "$CH_KEYSTORE" ]; then N=CyberHire-$V-play.aab; else N=CyberHire-$V-play-unsigned.aab; fi
+          cp app/build/outputs/bundle/release/app-release.aab ../../$N
+          cp app/build/outputs/apk/debug/app-debug.apk ../../CyberHire-$V-test.apk
+          ls -la ../../*.aab ../../*.apk
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "play-${{ github.run_number }}" *.aab *.apk --latest=false \
+            --title "CyberHire for Google Play ${{ steps.cfg.outputs.ver }} (build ${{ github.run_number }})" \
+            --notes "Google Play app bundle (.aab) for Play Console, plus a test APK. Package ${{ steps.cfg.outputs.pkg }}, server ${{ steps.cfg.outputs.api }}."
