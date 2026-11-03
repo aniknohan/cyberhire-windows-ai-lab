@@ -1,14 +1,23 @@
 import { useQuery } from "@tanstack/react-query";
 import { Navigate, useLocation } from "react-router-dom";
 import type { ReactNode } from "react";
-import { apiGet } from "@/lib/api";
+import { ApiError, apiGet } from "@/lib/api";
 import { useBilling, useConfig } from "@/lib/config";
 import type { User } from "@/lib/types";
 
 export function useMe() {
+  // "Not signed in" is a normal answer (null), not an error: an error state would be refetched every time
+  // another component asks, which made public pages flicker between loading and content.
   return useQuery({
     queryKey: ["me"],
-    queryFn: () => apiGet<User>("/auth/me"),
+    queryFn: async (): Promise<User | null> => {
+      try {
+        return await apiGet<User>("/auth/me");
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 401) return null;
+        throw e;
+      }
+    },
     retry: false,
     staleTime: 60_000,
   });
