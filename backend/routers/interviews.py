@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from lib.answers import delete_audio, process_answer, save_audio
 from lib.auth import current_user
-from routers.billing import require_interview_allowance
+from routers.billing import require_interview_allowance, require_ai
 from lib.companies import generate_company
 from lib.db import db
 from lib.interview_engine import MODE_ROUNDS, next_turn, pick_seed_questions, round_meta, soc_level, track_of
@@ -159,7 +159,7 @@ async def delete_interview(iid: str, user: dict = Depends(current_user)):
 
 
 @router.post("/interviews/{iid}/join", response_model=InterviewOut)
-async def join_interview(iid: str, body: JoinIn, user: dict = Depends(current_user)):
+async def join_interview(iid: str, body: JoinIn, user: dict = Depends(require_ai)):
     iv = await _get_iv(iid, user)
     upd = {"record_audio": body.record_audio}
     if iv["status"] == "setup":
@@ -202,7 +202,7 @@ async def _interviewer_turn(iv: dict, user: dict, idx: int) -> InterviewerReply:
 
 
 @router.post("/interviews/{iid}/rounds/{idx}/start", response_model=InterviewerReply)
-async def start_round(iid: str, idx: int, user: dict = Depends(current_user)):
+async def start_round(iid: str, idx: int, user: dict = Depends(require_ai)):
     iv = await _get_iv(iid, user)
     if idx >= len(iv["rounds"]) or idx != iv["current_round"]:
         raise HTTPException(status_code=400, detail="This round is not available")
@@ -225,7 +225,7 @@ async def list_turns(iid: str, user: dict = Depends(current_user)):
 
 
 @router.post("/interviews/{iid}/respond", response_model=RespondOut)
-async def respond(iid: str, body: RespondIn, user: dict = Depends(current_user)):
+async def respond(iid: str, body: RespondIn, user: dict = Depends(require_ai)):
     iv = await _get_iv(iid, user)
     idx = iv["current_round"]
     rnd = iv["rounds"][idx]
@@ -258,7 +258,7 @@ async def respond(iid: str, body: RespondIn, user: dict = Depends(current_user))
 
 
 @router.post("/interviews/{iid}/undo-last", response_model=InterviewerReply)
-async def undo_last(iid: str, user: dict = Depends(current_user)):
+async def undo_last(iid: str, user: dict = Depends(require_ai)):
     """Coach mode 'try again': remove the last answer + reply, return the question to re-answer."""
     iv = await _get_iv(iid, user)
     if not iv.get("coach_mode"):
@@ -391,7 +391,7 @@ async def _finalize(iid: str) -> None:
 
 
 @router.post("/interviews/{iid}/rounds/{idx}/complete", response_model=InterviewOut)
-async def complete_round(iid: str, idx: int, user: dict = Depends(current_user)):
+async def complete_round(iid: str, idx: int, user: dict = Depends(require_ai)):
     iv = await _get_iv(iid, user)
     if idx != iv["current_round"] or iv["rounds"][idx]["status"] == "completed":
         return await _to_out(iv)
@@ -411,7 +411,7 @@ async def complete_round(iid: str, idx: int, user: dict = Depends(current_user))
 
 
 @router.post("/interviews/{iid}/end", response_model=InterviewOut)
-async def end_early(iid: str, user: dict = Depends(current_user)):
+async def end_early(iid: str, user: dict = Depends(require_ai)):
     """Candidate leaves early: complete the current round and evaluate what was answered."""
     iv = await _get_iv(iid, user)
     if iv["status"] in ("completed", "evaluating"):
@@ -429,7 +429,7 @@ async def end_early(iid: str, user: dict = Depends(current_user)):
 
 
 @router.post("/interviews/{iid}/finalize", response_model=InterviewOut)
-async def refinalize(iid: str, user: dict = Depends(current_user)):
+async def refinalize(iid: str, user: dict = Depends(require_ai)):
     iv = await _get_iv(iid, user)
     if iv["status"] == "failed":
         await db.interviews.update_one({"id": iid}, {"$set": {"status": "evaluating"}})
@@ -458,7 +458,7 @@ async def _get_resp(rid: str, user: dict) -> dict:
 
 
 @router.post("/responses/{rid}/coach", response_model=Evaluation)
-async def coach_feedback(rid: str, user: dict = Depends(current_user)):
+async def coach_feedback(rid: str, user: dict = Depends(require_ai)):
     r = await _get_resp(rid, user)
     if r.get("evaluation"):
         return Evaluation(**r["evaluation"])
@@ -474,7 +474,7 @@ async def coach_feedback(rid: str, user: dict = Depends(current_user)):
 
 
 @router.post("/responses/{rid}/retry", response_model=RetryResult)
-async def retry_answer(rid: str, body: AnswerIn, user: dict = Depends(current_user)):
+async def retry_answer(rid: str, body: AnswerIn, user: dict = Depends(require_ai)):
     r = await _get_resp(rid, user)
     ans = await process_answer(body.audio_b64, body.mime, body.text)
     if not ans["transcript"]:

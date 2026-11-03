@@ -510,7 +510,11 @@ class DrillAnswerIn(BaseModel):
 
 # ---------- billing ----------
 class BillingStatus(BaseModel):
-    plan: Literal["trial", "pro", "expired"]
+    mode: Literal["web", "desktop"] = "desktop"
+    plan: Literal["none", "trial", "pro", "expired"]
+    trial_available: bool = False
+    interviews_used: int = 0
+    interviews_limit: Optional[int] = None
     is_pro: bool
     has_access: bool
     on_trial: bool
@@ -529,6 +533,33 @@ class BillingStatus(BaseModel):
 class CheckoutIn(BaseModel):
     origin_url: str = Field(min_length=8, max_length=300)
     interval: Literal["month", "year"] = "month"
+
+
+class PortalOut(BaseModel):
+    url: str
+
+
+class ForgotIn(BaseModel):
+    email: EmailStr
+
+
+class ResetIn(BaseModel):
+    token: str = Field(min_length=20, max_length=200)
+    password: str = Field(min_length=8, max_length=200)
+
+
+class DeleteAccountIn(BaseModel):
+    password: Optional[str] = None
+    confirm: str = Field(min_length=1, max_length=20)
+
+
+class PublicConfig(BaseModel):
+    mode: Literal["web", "desktop"]
+    trial_days: int
+    monthly_price_label: str
+    yearly_price_label: str
+    google_login: bool = False
+    support_email: str = ""
 
 
 class CheckoutOut(BaseModel):

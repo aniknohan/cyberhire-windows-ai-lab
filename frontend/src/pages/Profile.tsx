@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { DeleteAccountPanel, SubscriptionPanel } from "@/pages/Account";
 
 function ResumeCard({ me, onSummary }: { me: User; onSummary: (s: string) => void }) {
   const qc = useQueryClient();
@@ -107,7 +108,13 @@ export default function Profile() {
   return (
     <AppShell>
       <PageHeader eyebrow="Candidate profile" title="Your profile" desc={me?.email} />
-      {me && <ProfileForm key={me.resume_filename + me.id} me={me} />}
+      {me && (
+        <div className="space-y-6">
+          <SubscriptionPanel />
+          <ProfileForm key={me.resume_filename + me.id} me={me} />
+          {me.role !== "admin" && <DeleteAccountPanel />}
+        </div>
+      )}
     </AppShell>
   );
 }

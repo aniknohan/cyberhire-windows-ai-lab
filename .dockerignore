@@ -1,0 +1,14 @@
+**/node_modules
+**/__pycache__
+**/.venv
+**/local-data
+**/.env
+.git
+dist
+out
+android-app
+electron
+build
+docs
+*.exe
+*.apk

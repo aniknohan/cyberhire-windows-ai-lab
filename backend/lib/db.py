@@ -5,21 +5,31 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from lib.localdb import ASCENDING, DESCENDING, IndexModel, LocalClient
 from lib.paths import DATA_DIR
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-# Desktop build: an embedded, file-backed database replaces the MongoDB server.
-# It lives in the user's app-data folder (DATA_DIR) and keeps the motor API the app uses.
-client = LocalClient(DATA_DIR / "soc-interview-simulator.db")
+if os.environ.get("MONGO_URL"):
+    # Hosted website with a MongoDB server (e.g. MongoDB Atlas): the motor driver, same API.
+    from motor.motor_asyncio import AsyncIOMotorClient
+    from pymongo import ASCENDING, DESCENDING, IndexModel
+
+    client = AsyncIOMotorClient(os.environ["MONGO_URL"], tz_aware=True)
+else:
+    # Desktop app (and the website on a persistent disk): an embedded, file-backed database with the
+    # same motor API. It lives in DATA_DIR (the user's app-data folder, or the server's disk).
+    from lib.localdb import ASCENDING, DESCENDING, IndexModel, LocalClient
+
+    client = LocalClient(DATA_DIR / "soc-interview-simulator.db")
 db = client[os.environ.get("DB_NAME", "soc_interview_simulator")]
 
 logger = logging.getLogger(__name__)
 
 # One entry per collection: every field a route filters, sorts, or dedupes on. Applied by ensure_indexes() at startup.
 INDEXES: dict[str, list[IndexModel]] = {
-    "users": [IndexModel([("id", ASCENDING)], name="id", unique=True), IndexModel([("email", ASCENDING)], name="email", unique=True)],
+    "users": [IndexModel([("id", ASCENDING)], name="id", unique=True), IndexModel([("email", ASCENDING)], name="email", unique=True),
+              IndexModel([("stripe_subscription_id", ASCENDING)], name="stripe_sub"), IndexModel([("stripe_customer_id", ASCENDING)], name="stripe_customer"),
+              IndexModel([("play_purchase_token", ASCENDING)], name="play_token")],
     "interviews": [IndexModel([("id", ASCENDING)], name="id", unique=True),
                    IndexModel([("user_id", ASCENDING), ("status", ASCENDING), ("created_at", DESCENDING)], name="user_status_created")],
     "turns": [IndexModel([("interview_id", ASCENDING), ("round_index", ASCENDING), ("created_at", ASCENDING)], name="iv_round_created")],
@@ -30,6 +40,7 @@ INDEXES: dict[str, list[IndexModel]] = {
     "practice_sessions": [IndexModel([("user_id", ASCENDING), ("module", ASCENDING), ("created_at", DESCENDING)], name="user_module_created")],
     "drills": [IndexModel([("id", ASCENDING)], name="id", unique=True), IndexModel([("user_id", ASCENDING), ("created_at", DESCENDING)], name="user_created")],
     "payment_transactions": [IndexModel([("session_id", ASCENDING)], name="session_id", unique=True)],
+    "password_resets": [IndexModel([("token_hash", ASCENDING)], name="token_hash", unique=True)],
     "questions": [IndexModel([("id", ASCENDING)], name="id", unique=True), IndexModel([("round", ASCENDING)], name="round")],
     "personas": [IndexModel([("id", ASCENDING)], name="id", unique=True)],
     "scenarios": [IndexModel([("id", ASCENDING)], name="id", unique=True)],

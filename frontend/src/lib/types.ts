@@ -390,8 +390,25 @@ export interface Drill {
   created_at: string;
 }
 
+export interface PublicConfig {
+  mode: "web" | "desktop";
+  trial_days: number;
+  monthly_price_label: string;
+  yearly_price_label: string;
+  google_login: boolean;
+  support_email: string;
+}
+
+export interface PortalOut {
+  url: string;
+}
+
 export interface BillingStatus {
-  plan: "trial" | "pro" | "expired";
+  mode: "web" | "desktop";
+  plan: "none" | "trial" | "pro" | "expired";
+  trial_available: boolean;
+  interviews_used: number;
+  interviews_limit: number | null;
   is_pro: boolean;
   has_access: boolean;
   on_trial: boolean;

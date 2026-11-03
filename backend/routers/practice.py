@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from lib.answers import process_answer
 from lib.auth import current_user
-from routers.billing import require_pro
+from routers.billing import require_pro, require_ai
 from lib.db import db
 from lib.llm import llm_json
 from lib.scoring import PRACTICE_MODULES, audio_metrics_line, clean_eval, evaluate_responses, filler_score, pace_score
@@ -42,7 +42,7 @@ def pronunciation_match(target: str, transcript: str) -> float:
 
 
 @router.post("/evaluate", response_model=PracticeResult)
-async def evaluate(body: PracticeIn, user: dict = Depends(require_pro)):
+async def evaluate(body: PracticeIn, user: dict = Depends(require_ai)):
     return await _evaluate(body, user)
 
 
@@ -97,7 +97,7 @@ DRILL_MODULES = [m for m in PRACTICE_MODULES if m != "rapid_interview"]
 
 
 @router.post("/drills", response_model=Drill)
-async def create_drill(body: DrillCreate, user: dict = Depends(require_pro)):
+async def create_drill(body: DrillCreate, user: dict = Depends(require_ai)):
     last = await db.interviews.find_one({"user_id": user["id"], "status": "completed"}, {"_id": 0, "position": 1, "report": 1}, sort=[("created_at", -1)])
     role = (last or {}).get("position") or user.get("target_role") or "SOC Analyst"
     weak = ((last or {}).get("report") or {}).get("weaknesses", [])[:5]
@@ -140,7 +140,7 @@ async def get_drill(did: str, user: dict = Depends(current_user)):
 
 
 @router.post("/drills/{did}/items/{idx}", response_model=PracticeResult)
-async def answer_drill_item(did: str, idx: int, body: DrillAnswerIn, user: dict = Depends(current_user)):
+async def answer_drill_item(did: str, idx: int, body: DrillAnswerIn, user: dict = Depends(require_ai)):
     d = await db.drills.find_one({"id": did, "user_id": user["id"]}, {"_id": 0})
     if not d:
         raise HTTPException(status_code=404, detail="Drill not found")

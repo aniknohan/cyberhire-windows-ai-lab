@@ -1,0 +1,46 @@
+# Render Blueprint for the CyberHire website. In Render: New → Blueprint → pick this repository.
+# Render asks for every value marked "sync: false" (your secrets) and generates JWT_SECRET for you.
+services:
+  - type: web
+    name: cyberhire
+    runtime: docker
+    plan: starter            # always-on, needed for the persistent disk
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/
+    autoDeploy: true
+    disk:
+      name: cyberhire-data   # the built-in database + answer recordings
+      mountPath: /var/data
+      sizeGB: 5
+    envVars:
+      - key: SOC_MODE
+        value: web
+      - key: JWT_SECRET
+        generateValue: true
+      - key: PUBLIC_URL        # your site address, e.g. https://cyberhire.app (or the onrender.com address at first)
+        sync: false
+      - key: OPENAI_API_KEY    # your OpenAI key: pays for everyone's interviews
+        sync: false
+      - key: ANTHROPIC_API_KEY # optional: use Claude for interviewing/scoring
+        sync: false
+      - key: STRIPE_SECRET_KEY # sk_live_... (or sk_test_... while testing)
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET  # whsec_... from the Stripe webhook you create for <PUBLIC_URL>/api/stripe/webhook
+        sync: false
+      - key: ADMIN_EMAIL       # your own login with admin rights (free access)
+        sync: false
+      - key: ADMIN_PASSWORD    # 10+ characters
+        sync: false
+      - key: SUPPORT_EMAIL     # shown on the site for contact and refunds
+        sync: false
+      - key: RESEND_API_KEY    # optional but recommended: sends password-reset emails
+        sync: false
+      - key: EMAIL_FROM        # e.g. CyberHire <no-reply@yourdomain.com> (a domain verified in Resend)
+        sync: false
+      - key: TRIAL_DAYS
+        value: "3"
+      - key: TRIAL_INTERVIEW_LIMIT
+        value: "3"
+      - key: MONTHLY_INTERVIEW_LIMIT
+        value: "60"

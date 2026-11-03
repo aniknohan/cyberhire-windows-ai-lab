@@ -1,0 +1,92 @@
+name: Website tests
+
+on:
+  push:
+    branches: [main]
+    paths: ['backend/**', 'frontend/**', 'e2e/**', 'Dockerfile', 'render.yaml', '.github/workflows/web-ci.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      stripe:
+        image: stripe/stripe-mock:latest
+        ports: ['12111:12111']
+    env:
+      STRIPE_API_BASE: http://localhost:12111
+      STRIPE_WEBHOOK_SECRET: whsec_test_secret
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: actions/setup-node@v5
+        with: { node-version: 22 }
+
+      - name: Install backend
+        run: pip install -r backend/requirements-web.txt pytest==8.3.4 playwright==1.49.1
+
+      - name: API tests (website mode)
+        working-directory: backend
+        run: |
+          set -o pipefail
+          python -m pytest tests -q -rf -p no:cacheprovider 2>&1 | tee ../pytest-web.txt || { grep -E "^(FAILED|ERROR)|Error|assert" ../pytest-web.txt | head -40 | sed 's/^/::error::/'; exit 1; }
+
+      - name: API tests (desktop app stays free)
+        working-directory: backend
+        run: |
+          set -o pipefail
+          python -m pytest tests_desktop -q -rf -p no:cacheprovider 2>&1 | tee ../pytest-desktop.txt || { grep -E "^(FAILED|ERROR)|Error|assert" ../pytest-desktop.txt | head -40 | sed 's/^/::error::/'; exit 1; }
+
+      - name: Build website
+        working-directory: frontend
+        run: |
+          npx --yes yarn@1.22.22 install --frozen-lockfile --network-timeout 600000
+          npx --yes yarn@1.22.22 build
+
+      - name: Type check (report only)
+        working-directory: frontend
+        continue-on-error: true
+        run: npx tsc -b --noEmit 2>&1 | grep -E "error TS" | grep -E "src/(pages/(Landing|Legal|Account|Pricing|AuthPage|Profile)|components/(PublicLayout|AppShell)|lib/(config|auth|billing)|App)" | head -30 | sed 's/^/::warning::/' || true
+
+      - name: Browser test
+        env:
+          SOC_MODE: web
+          JWT_SECRET: e2e-secret-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+          COOKIE_SECURE: "0"
+          PUBLIC_URL: http://127.0.0.1:8000
+          STRIPE_SECRET_KEY: sk_test_123
+          SOC_DATA_DIR: ${{ runner.temp }}/data
+          SOC_FRONTEND_DIR: ${{ github.workspace }}/frontend/dist
+          SUPPORT_EMAIL: support@example.com
+        run: |
+          python -m playwright install --with-deps chromium
+          cd backend && (python -m uvicorn server:app --host 127.0.0.1 --port 8000 > ../server.log 2>&1 &) && cd ..
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:8000/api/ && break; sleep 1; done
+          python e2e/web_e2e.py || { tail -40 server.log | sed 's/^/::error::server: /'; exit 1; }
+
+      - name: Publish test screenshots (draft release, visible only to the owner)
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for t in $(gh release list --limit 50 --json tagName,isDraft -q '.[] | select(.isDraft) | .tagName' | grep '^web-ci-' || true); do gh release delete "$t" --yes || true; done
+          ls e2e-shots/*.png >/dev/null 2>&1 && gh release create "web-ci-${{ github.run_number }}" e2e-shots/*.png --draft --title "Website test screenshots ${{ github.run_number }}" --notes "CI screenshots" || true
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build the website image
+        run: docker build -t cyberhire-web .
+      - name: Start it and check it answers
+        run: |
+          docker run -d --name web -p 8000:8000 -e JWT_SECRET=$(openssl rand -hex 32) -e PUBLIC_URL=http://127.0.0.1:8000 cyberhire-web
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:8000/api/ && break; sleep 1; done
+          curl -sf http://127.0.0.1:8000/api/config | grep '"mode":"web"'
+          curl -sf http://127.0.0.1:8000/ | grep -i '<div id="root"'
+          curl -sf http://127.0.0.1:8000/terms | grep -i '<div id="root"'
+          docker logs web | tail -20

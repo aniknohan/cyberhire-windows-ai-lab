@@ -13,8 +13,12 @@ logger = logging.getLogger(__name__)
 
 async def seed_all() -> None:
     try:
-        email = os.environ.get("ADMIN_EMAIL", "admin@socsim.com").lower()
-        if not await db.users.find_one({"email": email}):
+        from lib.mode import WEB
+        email = os.environ.get("ADMIN_EMAIL", "" if WEB else "admin@socsim.com").lower()
+        weak = os.environ.get("ADMIN_PASSWORD", "Admin@123") == "Admin@123" or len(os.environ.get("ADMIN_PASSWORD", "")) < 10
+        if WEB and (not email or weak):
+            logger.warning("No admin account created: set ADMIN_EMAIL and a strong ADMIN_PASSWORD (10+ characters).")
+        elif not await db.users.find_one({"email": email}):
             await db.users.insert_one({
                 "id": str(uuid.uuid4()), "email": email, "name": "SOC Admin",
                 "password_hash": hash_password(os.environ.get("ADMIN_PASSWORD", "Admin@123")),

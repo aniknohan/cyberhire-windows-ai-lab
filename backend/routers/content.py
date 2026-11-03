@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 
 from lib import avatar
+from routers.billing import require_ai
 from lib.auth import admin_user, current_user
 from lib.db import db
 from lib.voice import synthesize
@@ -16,7 +17,7 @@ router = APIRouter(tags=["content"])
 
 
 @router.post("/voice/tts", response_model=TTSOut)
-async def tts(body: TTSIn, user: dict = Depends(current_user)):
+async def tts(body: TTSIn, user: dict = Depends(require_ai)):
     voice, style = body.voice or "alloy", ""
     if body.persona_id:
         p = await db.personas.find_one({"id": body.persona_id}, {"_id": 0})

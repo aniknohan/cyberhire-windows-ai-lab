@@ -4,9 +4,8 @@ import { useState, type ReactNode } from "react";
 import { LayoutDashboard, History, MessageSquareText, Cpu, Mic, Settings2, LogOut, Menu, UserRound, Plus } from "lucide-react";
 import { apiPost, clearToken } from "@/lib/api";
 import { useMe } from "@/lib/auth";
-import { useQuery } from "@tanstack/react-query";
-import { apiGet } from "@/lib/api";
-import type { BillingStatus } from "@/lib/types";
+import { daysLeft, useBilling, useConfig } from "@/lib/config";
+import { SiteFooter } from "@/components/PublicLayout";
 import { cn } from "@/lib/utils";
 import { buttonVariants } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
@@ -50,11 +49,14 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
   const nav = useNavigate();
   const [open, setOpen] = useState(false);
+  const { data: cfg } = useConfig();
+  const web = cfg?.mode === "web";
+  const { data: billing } = useBilling(web && !!me);
   const logout = async () => {
     await apiPost("/auth/logout").catch(() => undefined);
     clearToken();
     qc.clear();
-    nav("/login");
+    nav(web ? "/" : "/login");
   };
   return (
     <div className="min-h-screen">
@@ -71,6 +73,17 @@ export default function AppShell({ children }: { children: ReactNode }) {
             <NavItems admin={me?.role === "admin"} />
           </nav>
           <div className="ml-auto flex items-center gap-2">
+            {web && billing && me?.role !== "admin" && (billing.on_trial ? (
+              <Link to="/profile" className="hidden rounded-md border border-amber-400/30 bg-amber-400/10 px-2 py-0.5 font-mono text-[10px] tracking-wider text-amber-300 sm:inline" data-testid="nav-trial-badge">
+                TRIAL · {daysLeft(billing.trial_until).toUpperCase()}
+              </Link>
+            ) : billing.is_pro ? (
+              <Link to="/profile" className="hidden rounded-md border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 font-mono text-[10px] tracking-wider text-sky-300 sm:inline" data-testid="nav-pro-badge">PRO</Link>
+            ) : (
+              <Link to="/pricing" className={cn(buttonVariants({ size: "sm", variant: "secondary" }))} data-testid="nav-upgrade-button">
+                {billing.trial_available ? "Start free trial" : "Subscribe"}
+              </Link>
+            ))}
             <Link to="/interview/new" className={cn(buttonVariants({ size: "sm" }), "hidden sm:inline-flex")} data-testid="header-start-interview">
               <Plus className="size-3.5" /> New interview
             </Link>
@@ -93,6 +106,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         </SheetContent>
       </Sheet>
       <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:py-10">{children}</main>
+      {web && <SiteFooter supportEmail={cfg?.support_email} />}
     </div>
   );
 }

@@ -8,5 +8,9 @@ export function handleUpgradeError(e: unknown, go: (path: string) => void): bool
     toast(msg, { action: { label: "See plans", onClick: () => go("/pricing") }, duration: 8000 });
     return true;
   }
+  if (e instanceof ApiError && e.status === 429) {
+    toast(String((e.body as { detail?: string })?.detail ?? "You've reached a usage limit. Please try again later."), { duration: 8000 });
+    return true;
+  }
   return false;
 }

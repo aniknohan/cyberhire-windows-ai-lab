@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Smartphone, Video, MessagesSquare, Gavel } from "lucide-react";
-import { ApiError, IS_NATIVE, apiPost } from "@/lib/api";
+import { Loader2, Video, MessagesSquare, Gavel } from "lucide-react";
+import { ApiError, apiPost } from "@/lib/api";
+import { useConfig } from "@/lib/config";
 import type { User } from "@/lib/types";
 import { EXPERIENCE, POSITIONS } from "@/lib/constants";
 import { PositionOptions } from "@/components/common";
@@ -15,7 +16,7 @@ function errMsg(e: unknown): string {
   if (e instanceof ApiError) {
     const d = (e.body as { detail?: unknown })?.detail;
     if (typeof d === "string") return d;
-    if (Array.isArray(d)) return "Please check your email and use a password of at least 6 characters.";
+    if (Array.isArray(d)) return "Please check your email and use a password of at least 8 characters.";
   }
   return "Something went wrong. Please try again.";
 }
@@ -24,13 +25,16 @@ export default function AuthPage({ mode }: { mode: "login" | "register" }) {
   const nav = useNavigate();
   const loc = useLocation();
   const qc = useQueryClient();
+  const { data: cfg } = useConfig();
+  const web = cfg?.mode === "web";
   const [form, setForm] = useState({ email: "", password: "", name: "", target_role: "SOC Analyst L1", experience_level: "Entry Level" });
   const m = useMutation({
     mutationFn: () => apiPost<User>(mode === "login" ? "/auth/login" : "/auth/register", mode === "login" ? { email: form.email, password: form.password } : form),
     onSuccess: (u) => {
       qc.clear();
       qc.setQueryData(["me"], u);
-      nav((loc.state as { from?: string })?.from || "/", { replace: true });
+      const from = (loc.state as { from?: string })?.from;
+      nav(mode === "register" && web ? "/pricing?welcome=1" : from || "/", { replace: true });
     },
   });
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -45,10 +49,10 @@ export default function AuthPage({ mode }: { mode: "login" | "register" }) {
         />
         <div className="absolute inset-0 bg-gradient-to-br from-[#090D14] via-[#090D14]/80 to-transparent" />
         <div className="relative flex h-full flex-col justify-between p-12">
-          <div className="flex items-center gap-2">
+          <Link to="/" className="flex items-center gap-2">
             <img src="/logo.png" alt="CyberHire logo" className="size-8 rounded-md" data-testid="brand-logo" />
             <span className="font-heading font-semibold text-white">CyberHire</span>
-          </div>
+          </Link>
           <div className="max-w-lg">
             <h1 className="font-heading text-5xl leading-[1.05] font-semibold tracking-tight text-white">Walk into your next cybersecurity interview like you've already done it.</h1>
             <p className="mt-5 text-slate-300">Face-to-face video interviews with a recruiter, a senior analyst, an incident response lead and a SOC manager — then a real hiring decision.</p>
@@ -58,7 +62,7 @@ export default function AuthPage({ mode }: { mode: "login" | "register" }) {
               <div className="flex items-center gap-3"><Gavel className="size-4 text-sky-400" /> Strong Hire to No Hire, with the reasons explained</div>
             </div>
           </div>
-          <div className="font-mono text-[11px] text-slate-500">900+ cybersecurity interview questions · 11 interviewers · SOC, pentest, tools &amp; Python</div>
+          <div className="font-mono text-[11px] text-slate-500">Hundreds of cybersecurity interview questions · SOC, tools &amp; Python · live investigations</div>
         </div>
       </div>
       <div className="flex items-center justify-center px-6 py-12">
@@ -86,7 +90,9 @@ export default function AuthPage({ mode }: { mode: "login" | "register" }) {
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="password">Password</Label>
-            <Input id="password" type="password" value={form.password} onChange={set("password")} required minLength={6} data-testid={`${mode}-password-input`} />
+            <Input id="password" type="password" value={form.password} onChange={set("password")} required minLength={mode === "register" ? 8 : 1} autoComplete={mode === "login" ? "current-password" : "new-password"} data-testid={`${mode}-password-input`} />
+            {mode === "login" && web && <div className="text-right"><Link to="/forgot-password" className="text-xs text-sky-400 hover:underline" data-testid="forgot-link">Forgot password?</Link></div>}
+            {mode === "register" && <p className="text-[11px] text-slate-500">At least 8 characters.</p>}
           </div>
           {mode === "register" && (
             <div className="grid grid-cols-2 gap-3">
@@ -106,7 +112,7 @@ export default function AuthPage({ mode }: { mode: "login" | "register" }) {
               </div>
             </div>
           )}
-          {!IS_NATIVE && (
+          {cfg?.google_login && (
             <>
           <Button
             type="button"
@@ -136,15 +142,11 @@ export default function AuthPage({ mode }: { mode: "login" | "register" }) {
               {mode === "login" ? "Create an account" : "Sign in"}
             </Link>
           </p>
-          {!IS_NATIVE && (
-            <a
-              href="/downloads/CyberHire.apk"
-              download
-              className="flex items-center justify-center gap-2 rounded-lg border border-white/[0.08] px-3 py-2 text-xs text-slate-300 transition-colors hover:border-sky-500/40 hover:text-white"
-              data-testid={`${mode}-android-download-link`}
-            >
-              <Smartphone className="size-3.5 text-sky-400" /> Get the free Android app (APK)
-            </a>
+          {mode === "register" && web && (
+            <p className="text-center text-[11px] leading-relaxed text-slate-500">
+              By creating an account you agree to the <Link to="/terms" className="text-sky-400 hover:underline">Terms</Link> and{" "}
+              <Link to="/privacy" className="text-sky-400 hover:underline">Privacy policy</Link>. Next you'll choose a plan and start your free trial.
+            </p>
           )}
         </form>
       </div>
